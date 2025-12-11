@@ -9,12 +9,34 @@ from datetime import datetime
 from typing import Dict, Set
 import logging
 import os
+from starlette.middleware.cors import CORSMiddleware
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Webhook Service")
+
+# 启用 CORS 支持，允许来自前端域名的跨域请求（含预检）
+allowed_origins = [
+    "https://*.zeabur.app",
+    "https://*.730406.xyz",
+    "http://localhost",
+    "http://localhost:3000",
+    "http://127.0.0.1",
+    "http://127.0.0.1:3000",
+    "*"  # 如需更严格控制可移除此项
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
+)
 
 # Redis 连接
 redis_client = None
