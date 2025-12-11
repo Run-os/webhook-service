@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import redis.asyncio as redis
@@ -9,7 +9,9 @@ from datetime import datetime
 from typing import Dict, Set
 import logging
 import os
-from starlette.middleware.cors import CORSMiddleware
+import re
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -17,26 +19,57 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Webhook Service")
 
-# 启用 CORS 支持，允许来自前端域名的跨域请求（含预检）
-allowed_origins = [
-    "https://*.zeabur.app",
-    "https://*.730406.xyz",
-    "http://localhost",
-    "http://localhost:3000",
-    "http://127.0.0.1",
-    "http://127.0.0.1:3000",
-    "*"  # 如需更严格控制可移除此项
-]
+# 自定义 CORS 中间件，支持通配符子域名
+class CustomCORSMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app):
+        super().__init__(app)
+        # 允许的域名模式
+        self.allowed_origin_patterns = [
+            re.compile(r"^https://.*\.zeabur\.app$"),
+            re.compile(r"^https://.*\.730406\.xyz$"),
+            re.compile(r"^http://localhost(:\d+)?$"),
+            re.compile(r"^http://127\.0\.0\.1(:\d+)?$"),
+        ]
+    
+    def is_origin_allowed(self, origin: str) -> bool:
+        if not origin:
+            return True
+        for pattern in self.allowed_origin_patterns:
+            if pattern.match(origin):
+                return True
+        return False
+    
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "")
+        
+        # 处理预检请求 (OPTIONS)
+        if request.method == "OPTIONS":
+            response = Response(status_code=200)
+            if self.is_origin_allowed(origin):
+                response.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
+            else:
+                response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Max-Age"] = "600"
+            return response
+        
+        # 处理正常请求
+        response = await call_next(request)
+        
+        # 添加 CORS 头
+        if self.is_origin_allowed(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = "*"
+        return response
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=600,
-)
+app.add_middleware(CustomCORSMiddleware)
 
 # Redis 连接
 redis_client = None
